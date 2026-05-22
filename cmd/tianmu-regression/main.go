@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/raccoonrat/control-sci/tianmu/core"
 	"github.com/raccoonrat/control-sci/tianmu/regression"
@@ -15,6 +16,9 @@ import (
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "tianmu-regression: %v\n", err)
+		if isReleaseGateBlocked(err) {
+			os.Exit(2)
+		}
 		os.Exit(1)
 	}
 }
@@ -51,6 +55,9 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("run tc260 cases: %w", err)
 	}
+	if err := regression.NewRegressionDiffEngine().AssertNoDegradation(results); err != nil {
+		return err
+	}
 
 	report := regression.BuildTC260Report(*datasetPath, manifest, results, summary)
 	payload, err := json.MarshalIndent(report, "", "  ")
@@ -72,6 +79,10 @@ func run() error {
 	}
 
 	return nil
+}
+
+func isReleaseGateBlocked(err error) bool {
+	return err != nil && strings.HasPrefix(err.Error(), "release_gate_blocked")
 }
 
 func newOracleEngine() (*core.Engine, error) {
