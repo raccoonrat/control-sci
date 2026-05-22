@@ -1,6 +1,9 @@
 package core
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestChineseValidityMultiTurnIncrementalDrift(t *testing.T) {
 	tracker := NewSessionTracker(4)
@@ -41,6 +44,24 @@ func TestChineseValiditySessionWindowBoundsHistory(t *testing.T) {
 	}
 	if history.Turns[0].MaxRiskScore != 0.65 {
 		t.Fatalf("oldest retained score = %v, want 0.65", history.Turns[0].MaxRiskScore)
+	}
+}
+
+func TestChineseValiditySessionTrackerEvictsExpiredSessions(t *testing.T) {
+	tracker := NewSessionTrackerWithTTL(4, time.Minute)
+	tracker.sessions["expired-session"] = &SessionHistory{
+		SessionID:  "expired-session",
+		CreatedAt:  time.Now().UTC().Add(-2 * time.Hour),
+		LastActive: time.Now().UTC().Add(-2 * time.Hour),
+	}
+
+	tracker.RecordTurn("active-session", RiskEvaluation{RiskCategories: []string{"alignment_drift"}, MaxRiskScore: 0.65})
+
+	if _, ok := tracker.Snapshot("expired-session"); ok {
+		t.Fatal("expired session must be evicted")
+	}
+	if _, ok := tracker.Snapshot("active-session"); !ok {
+		t.Fatal("active session must exist")
 	}
 }
 

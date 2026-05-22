@@ -19,13 +19,14 @@ Phase 1 的目标是建立 Tianmu Runtime Control Plane 的最小工业闭环：
 
 - `sanitize.Normalizer` 已实现并覆盖形态学混淆。
 - `SessionTracker` 已实现，并已接入 `Engine` 主链路。
+- `SessionTracker` 具备默认 30 分钟 TTL 懒惰逐出，降低伪造会话导致的内存膨胀风险。
 - 连续 3 轮临界风险会触发 `AskConfirmation`。
 - TC260 oracle loader、runner、manifest 校验和 evidence report 已实现。
 
 ### Week 3：Tool I/O Boundary
 
 - `ToolInterceptor` 已实现工具注册、schema 校验和未注册工具阻断。
-- 工具参数中的中文字符串会经过 normalizer。
+- 工具参数中的中文字符串会经过 normalizer，并可通过 `InterceptCallWithPayload` 获取归一化后的 payload。
 - `HasSideEffect=true` 工具会路由到 `AskConfirmation`。
 - 中文 PII 高置信信号会路由到 `RedactThenAllow`。
 
@@ -34,6 +35,7 @@ Phase 1 的目标是建立 Tianmu Runtime Control Plane 的最小工业闭环：
 - `cmd/tianmu-regression` 已支持 `-dataset`、`-manifest`、`-out`。
 - manifest 强校验覆盖 `sha256`、`bytes`、`line_count`。
 - `RegressionDiffEngine` 阻断 `refuse -> Allow`。
+- `RegressionDiffEngine` 可识别 positive-control over-block 并由 CLI 输出软预警。
 - CLI 端到端测试已覆盖 report 生成和 prompt 脱敏。
 - GitHub Actions 已接入基础测试和 fast-path benchmark。
 
@@ -46,6 +48,12 @@ Phase 1 的目标是建立 Tianmu Runtime Control Plane 的最小工业闭环：
 3. `cmd/tianmu-regression` 增加端到端测试，覆盖临时数据集、manifest 和 evidence report。
 4. 新增 `Makefile`，统一本地验收命令。
 5. 新增 `.github/workflows/ci.yml`，提供 CI 基础门禁。
+
+根据 Phase 1 review 继续补齐：
+
+1. 工具调用归一化结果不再静默丢弃，调用方可获取 sanitized payload。
+2. 会话追踪器增加 TTL lazy eviction，避免长时间僵尸会话占用内存。
+3. Release Gate 增加 over-block soft warning，误伤进入质量预警但不阻断发布。
 
 ## 当前必须遵守的不变量
 

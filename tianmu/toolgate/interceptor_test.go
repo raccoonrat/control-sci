@@ -95,6 +95,30 @@ func TestValidateAndNormalizeParamsNormalizesChineseStringValues(t *testing.T) {
 	}
 }
 
+func TestInterceptCallWithPayloadReturnsSanitizedParams(t *testing.T) {
+	interceptor := newTestInterceptor(t)
+	if err := interceptor.RegisterTool(ToolDefinition{
+		Name:        "logger",
+		Description: "记录规范化消息",
+		ParamSchema: map[string]string{
+			"msg": "string",
+		},
+	}); err != nil {
+		t.Fatalf("register tool: %v", err)
+	}
+
+	call, err := interceptor.InterceptCallWithPayload("session-agent-001", "logger", `{"msg":"打~~~~开~~~~沙~~~~箱"}`, nil)
+	if err != nil {
+		t.Fatalf("intercept call: %v", err)
+	}
+	if call.Decision == nil {
+		t.Fatal("decision must not be nil")
+	}
+	if call.SanitizedParams["msg"] != "打开沙箱" {
+		t.Fatalf("sanitized msg = %q, want 打开沙箱", call.SanitizedParams["msg"])
+	}
+}
+
 func TestToolInterceptorMediatesPIIToRedact(t *testing.T) {
 	interceptor := newTestInterceptor(t)
 	if err := interceptor.RegisterTool(ToolDefinition{

@@ -22,15 +22,27 @@ type ToolInterceptor struct {
 	normalizer *sanitize.Normalizer
 }
 
+type InterceptedCall struct {
+	Decision        *core.ControlDecisionObject
+	SanitizedParams map[string]any
+}
+
 func NewToolInterceptor(engine *core.Engine) (*ToolInterceptor, error) {
+	return NewToolInterceptorWithNormalizer(engine, sanitize.NewNormalizer())
+}
+
+func NewToolInterceptorWithNormalizer(engine *core.Engine, normalizer *sanitize.Normalizer) (*ToolInterceptor, error) {
 	if engine == nil {
 		return nil, errors.New("engine is required")
+	}
+	if normalizer == nil {
+		return nil, errors.New("normalizer is required")
 	}
 
 	return &ToolInterceptor{
 		registry:   make(map[string]ToolDefinition),
 		engine:     engine,
-		normalizer: sanitize.NewNormalizer(),
+		normalizer: normalizer,
 	}, nil
 }
 
@@ -47,6 +59,15 @@ func (i *ToolInterceptor) RegisterTool(tool ToolDefinition) error {
 }
 
 func (i *ToolInterceptor) InterceptCall(sessionID string, toolName string, rawParams string, signals []core.DetectorSignal) (*core.ControlDecisionObject, error) {
+	call, err := i.InterceptCallWithPayload(sessionID, toolName, rawParams, signals)
+	if err != nil {
+		return nil, err
+	}
+
+	return call.Decision, nil
+}
+
+func (i *ToolInterceptor) InterceptCallWithPayload(sessionID string, toolName string, rawParams string, signals []core.DetectorSignal) (*InterceptedCall, error) {
 	if sessionID == "" {
 		return nil, errors.New("session id is required")
 	}
@@ -56,11 +77,12 @@ func (i *ToolInterceptor) InterceptCall(sessionID string, toolName string, rawPa
 		return nil, fmt.Errorf("unregistered_tool_execution_denied: %s", toolName)
 	}
 
-	if _, err := validateAndNormalizeParams(rawParams, tool.ParamSchema, i.normalizer); err != nil {
+	sanitizedParams, err := validateAndNormalizeParams(rawParams, tool.ParamSchema, i.normalizer)
+	if err != nil {
 		return nil, err
 	}
 
-	return i.engine.MediateInbound(
+	decision, err := i.engine.MediateInbound(
 		core.RequestContext{
 			ProductID:       "Qira",
 			Language:        "zh-CN",
@@ -80,6 +102,14 @@ func (i *ToolInterceptor) InterceptCall(sessionID string, toolName string, rawPa
 		},
 		signals,
 	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &InterceptedCall{
+		Decision:        decision,
+		SanitizedParams: sanitizedParams,
+	}, nil
 }
 
 func validateAndNormalizeParams(rawParams string, schema map[string]string, normalizer *sanitize.Normalizer) (map[string]any, error) {

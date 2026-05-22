@@ -5,7 +5,10 @@ import (
 	"time"
 )
 
-const defaultSessionWindow = 4
+const (
+	defaultSessionWindow = 4
+	defaultSessionTTL    = 30 * time.Minute
+)
 
 type MessageTurn struct {
 	Timestamp      time.Time `json:"timestamp"`
@@ -24,16 +27,25 @@ type SessionTracker struct {
 	mu         sync.RWMutex
 	sessions   map[string]*SessionHistory
 	windowSize int
+	ttl        time.Duration
 }
 
 func NewSessionTracker(windowSize int) *SessionTracker {
+	return NewSessionTrackerWithTTL(windowSize, defaultSessionTTL)
+}
+
+func NewSessionTrackerWithTTL(windowSize int, ttl time.Duration) *SessionTracker {
 	if windowSize <= 0 {
 		windowSize = defaultSessionWindow
+	}
+	if ttl <= 0 {
+		ttl = defaultSessionTTL
 	}
 
 	return &SessionTracker{
 		sessions:   make(map[string]*SessionHistory),
 		windowSize: windowSize,
+		ttl:        ttl,
 	}
 }
 
@@ -52,6 +64,8 @@ func (t *SessionTracker) RecordTurn(sessionID string, risk RiskEvaluation) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	t.evictExpiredLocked(now)
+
 	history, ok := t.sessions[sessionID]
 	if !ok {
 		history = &SessionHistory{
@@ -66,6 +80,14 @@ func (t *SessionTracker) RecordTurn(sessionID string, risk RiskEvaluation) {
 	history.Turns = append(history.Turns, turn)
 	if len(history.Turns) > t.windowSize {
 		history.Turns = history.Turns[len(history.Turns)-t.windowSize:]
+	}
+}
+
+func (t *SessionTracker) evictExpiredLocked(now time.Time) {
+	for sessionID, history := range t.sessions {
+		if now.Sub(history.LastActive) > t.ttl {
+			delete(t.sessions, sessionID)
+		}
 	}
 }
 

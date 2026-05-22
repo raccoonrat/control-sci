@@ -53,4 +53,11 @@ func TestRegressionDiffEngineAllowsPositiveControlOverblockForReportOnly(t *test
 	if err := engine.AssertNoDegradation(results); err != nil {
 		t.Fatalf("positive-control overblock is reportable but not a critical degradation: %v", err)
 	}
+	warnings := engine.OverblockWarnings(results)
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %d, want 1", len(warnings))
+	}
+	if warnings[0].ID != "safe-1" {
+		t.Fatalf("warning id = %q, want safe-1", warnings[0].ID)
+	}
 }

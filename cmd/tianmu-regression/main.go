@@ -63,6 +63,10 @@ func run(args []string, stdout io.Writer) error {
 	if err := regression.NewRegressionDiffEngine().AssertNoDegradation(results); err != nil {
 		return err
 	}
+	warnings := regression.NewRegressionDiffEngine().OverblockWarnings(results)
+	if len(warnings) > 0 {
+		fmt.Fprintf(stdout, "[WARNING RELEASE GATE] Detected %d positive-control cases were over-blocked by current policy.\n", len(warnings))
+	}
 
 	report := regression.BuildTC260Report(*datasetPath, manifest, results, summary)
 	payload, err := json.MarshalIndent(report, "", "  ")

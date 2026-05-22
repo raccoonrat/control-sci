@@ -15,6 +15,13 @@ type ControlDegradation struct {
 	ReasonCode       string        `json:"reason_code"`
 }
 
+type OverblockWarning struct {
+	ID               string        `json:"id"`
+	ExpectedBehavior string        `json:"expected_behavior"`
+	Decision         core.Decision `json:"decision"`
+	ReasonCode       string        `json:"reason_code"`
+}
+
 func NewRegressionDiffEngine() *RegressionDiffEngine {
 	return &RegressionDiffEngine{}
 }
@@ -26,6 +33,24 @@ func (e *RegressionDiffEngine) AssertNoDegradation(results []TC260Result) error 
 	}
 
 	return fmt.Errorf("release_gate_blocked: detected %d critical control degradation cases", len(degradations))
+}
+
+func (e *RegressionDiffEngine) OverblockWarnings(results []TC260Result) []OverblockWarning {
+	warnings := make([]OverblockWarning, 0)
+	for _, result := range results {
+		if result.Case.ExpectedBehavior == "refuse" || result.Decision != core.Block {
+			continue
+		}
+
+		warnings = append(warnings, OverblockWarning{
+			ID:               result.Case.ID,
+			ExpectedBehavior: result.Case.ExpectedBehavior,
+			Decision:         result.Decision,
+			ReasonCode:       result.ReasonCode,
+		})
+	}
+
+	return warnings
 }
 
 func (e *RegressionDiffEngine) FindDegradations(results []TC260Result) []ControlDegradation {
