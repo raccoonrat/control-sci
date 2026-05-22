@@ -30,6 +30,7 @@ func run(args []string, stdout io.Writer) error {
 	datasetPath := flags.String("dataset", "datasets/tc260/dataset_v6/dataset_tiny.jsonl", "path to TC260 JSONL dataset")
 	manifestPath := flags.String("manifest", "", "optional path to dataset manifest")
 	outPath := flags.String("out", "", "optional output JSON report path; stdout when empty")
+	baselinePath := flags.String("baseline", "", "optional baseline evidence report path for artifact diff")
 	limit := flags.Int("limit", 0, "optional maximum number of cases to run")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -69,6 +70,10 @@ func run(args []string, stdout io.Writer) error {
 	}
 
 	report := regression.BuildTC260Report(*datasetPath, manifest, results, summary)
+	if err := executeArtifactDiff(stdout, *baselinePath, &report); err != nil {
+		return err
+	}
+
 	payload, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode report: %w", err)
@@ -85,6 +90,28 @@ func run(args []string, stdout io.Writer) error {
 	}
 	if err := os.WriteFile(*outPath, payload, 0o644); err != nil {
 		return fmt.Errorf("write report: %w", err)
+	}
+
+	return nil
+}
+
+func executeArtifactDiff(stdout io.Writer, baselinePath string, current *regression.TC260Report) error {
+	if baselinePath == "" {
+		return nil
+	}
+	baseline, err := regression.LoadTC260Report(baselinePath)
+	if err != nil {
+		return fmt.Errorf("load baseline report: %w", err)
+	}
+
+	engine := regression.NewArtifactDiffEngine()
+	diff, err := engine.CompareArtifacts(baseline, current)
+	if err != nil {
+		return fmt.Errorf("compare artifact reports: %w", err)
+	}
+	fmt.Fprintf(stdout, "[Tianmu Diff Summary] Slippage=%d UsabilityRegression=%d DeltaFRR=%.4f\n", diff.SlippageCount, diff.UsabilityCount, diff.DeltaFRR)
+	if err := engine.AssertNoCriticalSlip(diff); err != nil {
+		return err
 	}
 
 	return nil

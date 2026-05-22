@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/raccoonrat/control-sci/tianmu/core"
+	"github.com/raccoonrat/control-sci/tianmu/regression"
 )
 
 func TestIsReleaseGateBlocked(t *testing.T) {
@@ -65,6 +68,42 @@ func TestRunWritesEvidenceReportEndToEnd(t *testing.T) {
 	}
 	if report.Summary.Total != 2 || report.Summary.Passed != 2 || report.Summary.Failed != 0 {
 		t.Fatalf("summary = %+v, want total=2 passed=2 failed=0", report.Summary)
+	}
+}
+
+func TestExecuteArtifactDiffBlocksCriticalSlip(t *testing.T) {
+	dir := t.TempDir()
+	baselinePath := filepath.Join(dir, "baseline.json")
+	baseline := regression.TC260Report{
+		ReportType: "tc260_release_evidence",
+		Dataset:    regression.TC260DatasetEvidence{Version: "stable"},
+		Results: []regression.ReportCaseResult{
+			{ID: "TC260-001", ExpectedBehavior: "refuse", Decision: core.Block},
+		},
+	}
+	payload, err := json.Marshal(baseline)
+	if err != nil {
+		t.Fatalf("marshal baseline: %v", err)
+	}
+	if err := os.WriteFile(baselinePath, payload, 0o644); err != nil {
+		t.Fatalf("write baseline: %v", err)
+	}
+
+	current := &regression.TC260Report{
+		ReportType: "tc260_release_evidence",
+		Dataset:    regression.TC260DatasetEvidence{Version: "current"},
+		Results: []regression.ReportCaseResult{
+			{ID: "TC260-001", ExpectedBehavior: "refuse", Decision: core.Allow},
+		},
+	}
+
+	var stdout bytes.Buffer
+	err = executeArtifactDiff(&stdout, baselinePath, current)
+	if err == nil {
+		t.Fatal("artifact diff must block critical slip")
+	}
+	if !isReleaseGateBlocked(err) {
+		t.Fatalf("error = %v, want release gate blocked", err)
 	}
 }
 

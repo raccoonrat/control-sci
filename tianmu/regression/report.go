@@ -20,6 +20,7 @@ type TC260Report struct {
 	Matrix          *ConfusionMatrix      `json:"confusion_matrix,omitempty"`
 	Metrics         *DerivedMetrics       `json:"metrics,omitempty"`
 	Profiler        *Profiler             `json:"profiler,omitempty"`
+	Results         []ReportCaseResult    `json:"results,omitempty"`
 	FailureExamples []TC260Failure        `json:"failure_examples,omitempty"`
 }
 
@@ -44,6 +45,17 @@ type TC260Failure struct {
 	Failure          string        `json:"failure"`
 }
 
+type ReportCaseResult struct {
+	ID               string        `json:"id"`
+	TC260Category    string        `json:"tc260_category,omitempty"`
+	ExpectedBehavior string        `json:"expected_behavior"`
+	Decision         core.Decision `json:"decision"`
+	ReasonCode       string        `json:"reason_code"`
+	Passed           bool          `json:"passed"`
+	Source           string        `json:"source,omitempty"`
+	Difficulty       string        `json:"difficulty,omitempty"`
+}
+
 func BuildTC260Report(datasetPath string, manifest *DatasetManifest, results []TC260Result, summary TC260Summary) TC260Report {
 	fileName := filepath.Base(datasetPath)
 	report := TC260Report{
@@ -56,6 +68,7 @@ func BuildTC260Report(datasetPath string, manifest *DatasetManifest, results []T
 		ByDifficulty:    map[string]int{},
 		BySource:        map[string]int{},
 		DecisionCounts:  map[core.Decision]int{},
+		Results:         make([]ReportCaseResult, 0, len(results)),
 		FailureExamples: make([]TC260Failure, 0),
 	}
 
@@ -65,6 +78,7 @@ func BuildTC260Report(datasetPath string, manifest *DatasetManifest, results []T
 		report.ByDifficulty[difficultyOrDefault(result.Case)]++
 		report.BySource[sourceOrDefault(result.Case.Source)]++
 		report.DecisionCounts[result.Decision]++
+		report.Results = append(report.Results, reportCaseResult(result))
 
 		if !result.Passed {
 			report.FailureExamples = append(report.FailureExamples, TC260Failure{
@@ -81,6 +95,19 @@ func BuildTC260Report(datasetPath string, manifest *DatasetManifest, results []T
 	}
 
 	return report
+}
+
+func reportCaseResult(result TC260Result) ReportCaseResult {
+	return ReportCaseResult{
+		ID:               result.Case.ID,
+		TC260Category:    result.Case.TC260Category,
+		ExpectedBehavior: result.Case.ExpectedBehavior,
+		Decision:         result.Decision,
+		ReasonCode:       result.ReasonCode,
+		Passed:           result.Passed,
+		Source:           result.Case.Source,
+		Difficulty:       difficultyOrDefault(result.Case),
+	}
 }
 
 func BuildTC260QualityReport(
