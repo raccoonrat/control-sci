@@ -17,6 +17,9 @@ type TC260Report struct {
 	ByDifficulty    map[string]int        `json:"by_difficulty"`
 	BySource        map[string]int        `json:"by_source"`
 	DecisionCounts  map[core.Decision]int `json:"decision_counts"`
+	Matrix          *ConfusionMatrix      `json:"confusion_matrix,omitempty"`
+	Metrics         *DerivedMetrics       `json:"metrics,omitempty"`
+	Profiler        *Profiler             `json:"profiler,omitempty"`
 	FailureExamples []TC260Failure        `json:"failure_examples,omitempty"`
 }
 
@@ -77,6 +80,22 @@ func BuildTC260Report(datasetPath string, manifest *DatasetManifest, results []T
 		}
 	}
 
+	return report
+}
+
+func BuildTC260QualityReport(
+	datasetPath string,
+	manifest *DatasetManifest,
+	results []TC260Result,
+	summary TC260Summary,
+	matrix ConfusionMatrix,
+	profiler *Profiler,
+) TC260Report {
+	report := BuildTC260Report(datasetPath, manifest, results, summary)
+	metrics := matrix.CalculateMetrics()
+	report.Matrix = &matrix
+	report.Metrics = &metrics
+	report.Profiler = profiler
 	return report
 }
 

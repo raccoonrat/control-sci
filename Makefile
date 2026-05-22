@@ -13,6 +13,7 @@ verify: test benchmark
 
 verify-phase2: test
 	go test -run 'TestRunner|TestToolInterceptorInterceptOutput' ./tianmu/detector ./tianmu/toolgate
+	go test -run 'TestConfusionMatrix|TestProfiler|TestRunLiveDetectorsRegression' ./tianmu/regression
 	go test -bench=BenchmarkBuiltinDetectors -benchmem ./tianmu/detector
 	go test -bench=BenchmarkInspectAndMediateLiveDetectors -benchmem ./tianmu/detector
 
