@@ -13,6 +13,8 @@ verify: test benchmark
 
 verify-phase2: test
 	go test -run 'TestRunner|TestToolInterceptorInterceptOutput' ./tianmu/detector ./tianmu/toolgate
+	go test -bench=BenchmarkBuiltinDetectors -benchmem ./tianmu/detector
+	go test -bench=BenchmarkInspectAndMediateLiveDetectors -benchmem ./tianmu/detector
 
 regression-tiny:
 	go run ./cmd/tianmu-regression \

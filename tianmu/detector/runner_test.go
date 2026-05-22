@@ -69,6 +69,10 @@ type fakeDetector struct {
 	detect   func(context.Context, string) (core.DetectorSignal, error)
 }
 
+func newTestNormalizer() *sanitize.Normalizer {
+	return sanitize.NewNormalizer()
+}
+
 func (d *fakeDetector) ID() string {
 	return d.id
 }
