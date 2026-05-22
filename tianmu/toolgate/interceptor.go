@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/raccoonrat/control-sci/tianmu/core"
+	"github.com/raccoonrat/control-sci/tianmu/sanitize"
 )
 
 type ToolDefinition struct {
@@ -16,8 +17,9 @@ type ToolDefinition struct {
 }
 
 type ToolInterceptor struct {
-	registry map[string]ToolDefinition
-	engine   *core.Engine
+	registry   map[string]ToolDefinition
+	engine     *core.Engine
+	normalizer *sanitize.Normalizer
 }
 
 func NewToolInterceptor(engine *core.Engine) (*ToolInterceptor, error) {
@@ -26,8 +28,9 @@ func NewToolInterceptor(engine *core.Engine) (*ToolInterceptor, error) {
 	}
 
 	return &ToolInterceptor{
-		registry: make(map[string]ToolDefinition),
-		engine:   engine,
+		registry:   make(map[string]ToolDefinition),
+		engine:     engine,
+		normalizer: sanitize.NewNormalizer(),
 	}, nil
 }
 
@@ -53,7 +56,7 @@ func (i *ToolInterceptor) InterceptCall(sessionID string, toolName string, rawPa
 		return nil, fmt.Errorf("unregistered_tool_execution_denied: %s", toolName)
 	}
 
-	if err := validateParams(rawParams, tool.ParamSchema); err != nil {
+	if _, err := validateAndNormalizeParams(rawParams, tool.ParamSchema, i.normalizer); err != nil {
 		return nil, err
 	}
 
@@ -79,28 +82,28 @@ func (i *ToolInterceptor) InterceptCall(sessionID string, toolName string, rawPa
 	)
 }
 
-func validateParams(rawParams string, schema map[string]string) error {
+func validateAndNormalizeParams(rawParams string, schema map[string]string, normalizer *sanitize.Normalizer) (map[string]any, error) {
 	var params map[string]any
 	if err := json.Unmarshal([]byte(rawParams), &params); err != nil {
-		return errors.New("tool_parameters_schema_malformed")
+		return nil, errors.New("tool_parameters_schema_malformed")
 	}
 
 	for key := range params {
 		if _, ok := schema[key]; !ok {
-			return fmt.Errorf("tool_parameters_unknown_field: %s", key)
+			return nil, fmt.Errorf("tool_parameters_unknown_field: %s", key)
 		}
 	}
 	for key, expectedType := range schema {
 		value, ok := params[key]
 		if !ok {
-			return fmt.Errorf("tool_parameters_missing_field: %s", key)
+			return nil, fmt.Errorf("tool_parameters_missing_field: %s", key)
 		}
 		if !matchesType(value, expectedType) {
-			return fmt.Errorf("tool_parameters_type_mismatch: %s", key)
+			return nil, fmt.Errorf("tool_parameters_type_mismatch: %s", key)
 		}
 	}
 
-	return nil
+	return normalizeParamValues(params, normalizer), nil
 }
 
 func matchesType(value any, expectedType string) bool {
@@ -122,5 +125,35 @@ func matchesType(value any, expectedType string) bool {
 		return ok
 	default:
 		return false
+	}
+}
+
+func normalizeParamValues(params map[string]any, normalizer *sanitize.Normalizer) map[string]any {
+	if normalizer == nil {
+		return params
+	}
+
+	normalized := make(map[string]any, len(params))
+	for key, value := range params {
+		normalized[key] = normalizeParamValue(value, normalizer)
+	}
+
+	return normalized
+}
+
+func normalizeParamValue(value any, normalizer *sanitize.Normalizer) any {
+	switch typed := value.(type) {
+	case string:
+		return normalizer.Normalize(typed)
+	case []any:
+		values := make([]any, len(typed))
+		for idx, item := range typed {
+			values[idx] = normalizeParamValue(item, normalizer)
+		}
+		return values
+	case map[string]any:
+		return normalizeParamValues(typed, normalizer)
+	default:
+		return value
 	}
 }

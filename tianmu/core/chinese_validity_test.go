@@ -44,6 +44,53 @@ func TestChineseValiditySessionWindowBoundsHistory(t *testing.T) {
 	}
 }
 
+func TestChineseValidityEngineUsesSessionTrackerForCumulativeRisk(t *testing.T) {
+	evaluator, err := NewEvaluator(PolicyPack{Version: "session-risk-policy-v1"})
+	if err != nil {
+		t.Fatalf("new evaluator: %v", err)
+	}
+	engine, err := NewEngine(PersonalAI, evaluator)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	engine.AttachSessionTracker(NewSessionTracker(4))
+
+	req := RequestContext{ProductID: "Qira", Language: "zh-CN", InteractionType: "user_io"}
+	identity := IdentityContext{ActorID: "session-user-test-03"}
+	data := DataContext{DataClassification: "public", Source: "user_input", Destination: "model_context"}
+	action := ActionContext{ActionType: "generate_response"}
+	signals := []DetectorSignal{
+		{
+			DetectorID: "alignment-drift-fastpath",
+			Category:   "alignment_drift",
+			Version:    "alignment-drift-v1",
+			Confidence: 0.65,
+			Triggered:  true,
+		},
+	}
+
+	for i := 0; i < 2; i++ {
+		decision, err := engine.MediateInbound(req, identity, data, action, signals)
+		if err != nil {
+			t.Fatalf("mediate inbound: %v", err)
+		}
+		if decision.PolicyDecision.Decision != Allow {
+			t.Fatalf("decision before cumulative threshold = %q, want %q", decision.PolicyDecision.Decision, Allow)
+		}
+	}
+
+	decision, err := engine.MediateInbound(req, identity, data, action, signals)
+	if err != nil {
+		t.Fatalf("mediate inbound: %v", err)
+	}
+	if decision.PolicyDecision.Decision != AskConfirmation {
+		t.Fatalf("decision after cumulative threshold = %q, want %q", decision.PolicyDecision.Decision, AskConfirmation)
+	}
+	if decision.PolicyDecision.ReasonCode != "cumulative_session_risk_requires_confirmation" {
+		t.Fatalf("reason = %q, want cumulative_session_risk_requires_confirmation", decision.PolicyDecision.ReasonCode)
+	}
+}
+
 func BenchmarkSessionTrackerRecordAndEvaluate(b *testing.B) {
 	tracker := NewSessionTracker(4)
 	sessionID := "benchmark-session"

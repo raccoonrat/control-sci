@@ -9,8 +9,9 @@ import (
 )
 
 type Engine struct {
-	evaluator    *Evaluator
-	releaseStage ReleaseStage
+	evaluator      *Evaluator
+	releaseStage   ReleaseStage
+	sessionTracker *SessionTracker
 }
 
 func NewEngine(stage ReleaseStage, evaluator *Evaluator) (*Engine, error) {
@@ -27,6 +28,10 @@ func NewEngine(stage ReleaseStage, evaluator *Evaluator) (*Engine, error) {
 	}, nil
 }
 
+func (e *Engine) AttachSessionTracker(tracker *SessionTracker) {
+	e.sessionTracker = tracker
+}
+
 func (e *Engine) MediateInbound(
 	req RequestContext,
 	identity IdentityContext,
@@ -37,6 +42,7 @@ func (e *Engine) MediateInbound(
 	now := time.Now().UTC()
 	risk := summarizeRisk(signals)
 	decision := e.evaluator.EvaluateAction(risk, action)
+	decision = e.applySessionRisk(identity.ActorID, risk, decision)
 
 	traceID, err := newTraceID()
 	if err != nil {
@@ -60,6 +66,23 @@ func (e *Engine) MediateInbound(
 			RegressionPassTag: true,
 		},
 	}, nil
+}
+
+func (e *Engine) applySessionRisk(sessionID string, risk RiskEvaluation, decision PolicyDecision) PolicyDecision {
+	if e.sessionTracker == nil || sessionID == "" {
+		return decision
+	}
+
+	e.sessionTracker.RecordTurn(sessionID, risk)
+	if decision.Decision != Allow || !e.sessionTracker.EvaluateCumulativeRisk(sessionID) {
+		return decision
+	}
+
+	return PolicyDecision{
+		Decision:          AskConfirmation,
+		PolicyPackVersion: decision.PolicyPackVersion,
+		ReasonCode:        "cumulative_session_risk_requires_confirmation",
+	}
 }
 
 func summarizeRisk(signals []DetectorSignal) RiskEvaluation {

@@ -1,0 +1,26 @@
+name: Phase 1 Gate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Run fast-path benchmarks once
+        run: |
+          go test -run '^$' -bench=BenchmarkMediateInboundFastPath -benchtime=1x ./tianmu/core
+          go test -run '^$' -bench=BenchmarkNormalizerFastPath -benchtime=1x ./tianmu/sanitize
+          go test -run '^$' -bench=BenchmarkToolInterceptorInterceptCall -benchtime=1x ./tianmu/toolgate

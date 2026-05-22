@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +15,7 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
+	if err := run(os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "tianmu-regression: %v\n", err)
 		if isReleaseGateBlocked(err) {
 			os.Exit(2)
@@ -23,12 +24,16 @@ func main() {
 	}
 }
 
-func run() error {
-	datasetPath := flag.String("dataset", "datasets/tc260/dataset_v6/dataset_tiny.jsonl", "path to TC260 JSONL dataset")
-	manifestPath := flag.String("manifest", "", "optional path to dataset manifest")
-	outPath := flag.String("out", "", "optional output JSON report path; stdout when empty")
-	limit := flag.Int("limit", 0, "optional maximum number of cases to run")
-	flag.Parse()
+func run(args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("tianmu-regression", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	datasetPath := flags.String("dataset", "datasets/tc260/dataset_v6/dataset_tiny.jsonl", "path to TC260 JSONL dataset")
+	manifestPath := flags.String("manifest", "", "optional path to dataset manifest")
+	outPath := flags.String("out", "", "optional output JSON report path; stdout when empty")
+	limit := flags.Int("limit", 0, "optional maximum number of cases to run")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
 
 	cases, err := regression.LoadTC260JSONL(*datasetPath, *limit)
 	if err != nil {
@@ -67,7 +72,7 @@ func run() error {
 	payload = append(payload, '\n')
 
 	if *outPath == "" {
-		_, err = os.Stdout.Write(payload)
+		_, err = stdout.Write(payload)
 		return err
 	}
 
