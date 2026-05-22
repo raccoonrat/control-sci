@@ -17,6 +17,7 @@ verify-phase2: test
 	go test -run 'TestArtifactDiff|TestExecuteArtifactDiff' ./tianmu/regression ./cmd/tianmu-regression
 	go test -bench=BenchmarkBuiltinDetectors -benchmem ./tianmu/detector
 	go test -bench=BenchmarkInspectAndMediateLiveDetectors -benchmem ./tianmu/detector
+	go test -bench=BenchmarkToolInterceptorInterceptOutput -benchmem ./tianmu/toolgate
 
 regression-tiny:
 	go run ./cmd/tianmu-regression \

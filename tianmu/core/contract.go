@@ -21,6 +21,11 @@ const (
 	LogOnly         Decision = "log_only"
 )
 
+const (
+	ActionCallTool      = "call_tool"
+	ActionProcessOutput = "process_tool_output"
+)
+
 type RequestContext struct {
 	ProductID       string `json:"product_id"`
 	Language        string `json:"language"`

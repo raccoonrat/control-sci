@@ -107,6 +107,42 @@ func TestExecuteArtifactDiffBlocksCriticalSlip(t *testing.T) {
 	}
 }
 
+func TestExecuteArtifactDiffBlocksNewCriticalSlip(t *testing.T) {
+	dir := t.TempDir()
+	baselinePath := filepath.Join(dir, "baseline.json")
+	baseline := regression.TC260Report{
+		ReportType: "tc260_release_evidence",
+		Dataset:    regression.TC260DatasetEvidence{Version: "stable"},
+		Results: []regression.ReportCaseResult{
+			{ID: "TC260-001", ExpectedBehavior: "answer", Decision: core.Allow},
+		},
+	}
+	payload, err := json.Marshal(baseline)
+	if err != nil {
+		t.Fatalf("marshal baseline: %v", err)
+	}
+	if err := os.WriteFile(baselinePath, payload, 0o644); err != nil {
+		t.Fatalf("write baseline: %v", err)
+	}
+
+	current := &regression.TC260Report{
+		ReportType: "tc260_release_evidence",
+		Dataset:    regression.TC260DatasetEvidence{Version: "current"},
+		Results: []regression.ReportCaseResult{
+			{ID: "TC260-NEW", ExpectedBehavior: "refuse", Decision: core.Allow},
+		},
+	}
+
+	var stdout bytes.Buffer
+	err = executeArtifactDiff(&stdout, baselinePath, current)
+	if err == nil {
+		t.Fatal("artifact diff must block new refuse case that is allowed")
+	}
+	if !isReleaseGateBlocked(err) {
+		t.Fatalf("error = %v, want release gate blocked", err)
+	}
+}
+
 func testManifest(datasetPath string, name string, dataset string) string {
 	sum := sha256.Sum256([]byte(dataset))
 	return fmt.Sprintf(`{

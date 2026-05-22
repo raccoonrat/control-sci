@@ -4,10 +4,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/raccoonrat/control-sci/tianmu/core"
 	"github.com/raccoonrat/control-sci/tianmu/sanitize"
+)
+
+const outboundBlockFallback = "[Tianmu Outbound Block] 外部工具返回数据违反系统合规红线，已拦截。"
+
+var (
+	outboundPhoneRegex  = regexp.MustCompile(`1[3-9]\d{9}`)
+	outboundIDCardRegex = regexp.MustCompile(`[1-6]\d{5}(18|19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]`)
 )
 
 type ToolDefinition struct {
@@ -97,7 +105,7 @@ func (i *ToolInterceptor) InterceptCallWithPayload(sessionID string, toolName st
 			Destination:        "external_api",
 		},
 		core.ActionContext{
-			ActionType: "call_tool",
+			ActionType: core.ActionCallTool,
 			ToolName:   toolName,
 			SideEffect: tool.HasSideEffect,
 		},
@@ -113,22 +121,22 @@ func (i *ToolInterceptor) InterceptCallWithPayload(sessionID string, toolName st
 	}, nil
 }
 
-func (i *ToolInterceptor) InterceptOutput(sessionID string, toolName string, rawOutput string) (string, *core.ControlDecisionObject, error) {
+func (i *ToolInterceptor) InterceptOutput(sessionID string, toolName string, rawOutput string, externalSignals ...[]core.DetectorSignal) (string, *core.ControlDecisionObject, error) {
 	if sessionID == "" {
 		return "", nil, errors.New("session id is required")
 	}
 	tool, ok := i.registry[toolName]
 	if !ok {
-		return "", nil, fmt.Errorf("unregistered_tool_execution_denied: %s", toolName)
+		return "", nil, fmt.Errorf("unregistered_tool_output_processing_denied: %s", toolName)
 	}
 
 	sanitizedOutput := i.normalizer.Normalize(rawOutput)
-	signals := outputSignals(sanitizedOutput)
+	signals := append(outputSignals(sanitizedOutput), flattenSignals(externalSignals)...)
 	decision, err := i.engine.MediateInbound(
 		core.RequestContext{
 			ProductID:       "Qira",
 			Language:        "zh-CN",
-			InteractionType: "tool_output",
+			InteractionType: "agent_loop",
 		},
 		core.IdentityContext{ActorID: sessionID},
 		core.DataContext{
@@ -138,7 +146,7 @@ func (i *ToolInterceptor) InterceptOutput(sessionID string, toolName string, raw
 			Destination:        "model_context",
 		},
 		core.ActionContext{
-			ActionType: "tool_output",
+			ActionType: core.ActionProcessOutput,
 			ToolName:   tool.Name,
 			SideEffect: false,
 		},
@@ -148,7 +156,14 @@ func (i *ToolInterceptor) InterceptOutput(sessionID string, toolName string, raw
 		return "", nil, err
 	}
 
-	return sanitizedOutput, decision, nil
+	switch decision.PolicyDecision.Decision {
+	case core.Block:
+		return outboundBlockFallback, decision, nil
+	case core.RedactThenAllow:
+		return redactOutboundPII(sanitizedOutput), decision, nil
+	default:
+		return sanitizedOutput, decision, nil
+	}
 }
 
 func validateAndNormalizeParams(rawParams string, schema map[string]string, normalizer *sanitize.Normalizer) (map[string]any, error) {
@@ -229,16 +244,16 @@ func normalizeParamValue(value any, normalizer *sanitize.Normalizer) any {
 
 func outputSignals(sanitizedOutput string) []core.DetectorSignal {
 	signals := make([]core.DetectorSignal, 0, 2)
-	if containsAny(sanitizedOutput, []string{"系统提示词", "忽略以上", "忽略之前", "打开沙箱"}) {
+	if containsAny(sanitizedOutput, []string{"系统提示词", "忽略以上", "忽略之前", "忽略前文", "打开沙箱", "管理员权限"}) {
 		signals = append(signals, core.DetectorSignal{
 			DetectorID: "tool-output-hidden-instruction",
-			Category:   "prompt_injection",
+			Category:   "indirect_injection",
 			Version:    "tool-output-boundary-v1",
 			Confidence: 0.90,
 			Triggered:  true,
 		})
 	}
-	if containsAny(sanitizedOutput, []string{"身份证", "手机号", "银行卡"}) {
+	if containsAny(sanitizedOutput, []string{"身份证", "手机号", "银行卡"}) || outboundPhoneRegex.MatchString(sanitizedOutput) || outboundIDCardRegex.MatchString(sanitizedOutput) {
 		signals = append(signals, core.DetectorSignal{
 			DetectorID: "tool-output-pii",
 			Category:   core.ChinesePIICategory,
@@ -259,6 +274,30 @@ func hasOutputPII(signals []core.DetectorSignal) bool {
 	}
 
 	return false
+}
+
+func flattenSignals(groups [][]core.DetectorSignal) []core.DetectorSignal {
+	total := 0
+	for _, group := range groups {
+		total += len(group)
+	}
+	signals := make([]core.DetectorSignal, 0, total)
+	for _, group := range groups {
+		signals = append(signals, group...)
+	}
+
+	return signals
+}
+
+func redactOutboundPII(output string) string {
+	redacted := outboundIDCardRegex.ReplaceAllString(output, "[REDACTED_ID_CARD]")
+	redacted = outboundPhoneRegex.ReplaceAllStringFunc(redacted, func(value string) string {
+		if len(value) < 7 {
+			return "[REDACTED_PHONE]"
+		}
+		return value[:3] + "****" + value[len(value)-4:]
+	})
+	return redacted
 }
 
 func containsAny(value string, needles []string) bool {
