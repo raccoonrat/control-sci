@@ -41,6 +41,7 @@ InterceptOutput(sessionID string, toolName string, rawOutput string, externalSig
 
 - 对手机号做掩码，例如 `13812345678 -> 138****5678`。
 - 对身份证号替换为 `[REDACTED_ID_CARD]`。
+- 脱敏路径使用单次 `strings.Builder` 扫描，避免大 payload 上连续正则替换产生中间字符串拷贝。
 
 `Allow`：
 
@@ -66,6 +67,7 @@ interceptor.InterceptOutput(sessionID, toolName, rawOutput, externalSignals)
 - Block 不返回原始工具输出。
 - Redact 不返回明文 PII。
 - Normalizer 不做外部 I/O。
+- 大 payload 脱敏不能通过多轮全量字符串替换实现。
 
 ## 验收命令
 

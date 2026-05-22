@@ -199,6 +199,25 @@ func TestToolInterceptorInterceptOutputRedactsPII(t *testing.T) {
 	}
 }
 
+func TestRedactOutboundPIILargePayloadSinglePass(t *testing.T) {
+	largePrefix := strings.Repeat("外部网页正文内容", 4096)
+	rawOutput := largePrefix + "手机号13812345678身份证11010119900307777X" + largePrefix
+
+	redacted := redactOutboundPII(rawOutput)
+	if strings.Contains(redacted, "13812345678") || strings.Contains(redacted, "11010119900307777X") {
+		t.Fatal("redacted output must not contain raw PII")
+	}
+	if !strings.Contains(redacted, "138****5678") {
+		t.Fatal("redacted output must contain masked phone")
+	}
+	if !strings.Contains(redacted, "[REDACTED_ID_CARD]") {
+		t.Fatal("redacted output must contain ID card placeholder")
+	}
+	if !strings.Contains(redacted, "外部网页正文内容") {
+		t.Fatal("redacted output must preserve non-sensitive content")
+	}
+}
+
 func TestToolInterceptorInterceptOutputUsesExternalSignals(t *testing.T) {
 	interceptor := newTestInterceptor(t)
 	registerLookupTool(t, interceptor)

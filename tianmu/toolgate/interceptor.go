@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/raccoonrat/control-sci/tianmu/core"
 	"github.com/raccoonrat/control-sci/tianmu/sanitize"
@@ -290,14 +291,32 @@ func flattenSignals(groups [][]core.DetectorSignal) []core.DetectorSignal {
 }
 
 func redactOutboundPII(output string) string {
-	redacted := outboundIDCardRegex.ReplaceAllString(output, "[REDACTED_ID_CARD]")
-	redacted = outboundPhoneRegex.ReplaceAllStringFunc(redacted, func(value string) string {
-		if len(value) < 7 {
-			return "[REDACTED_PHONE]"
+	var builder strings.Builder
+	builder.Grow(len(output))
+
+	for idx := 0; idx < len(output); {
+		if isIDCardAt(output, idx) {
+			builder.WriteString("[REDACTED_ID_CARD]")
+			idx += 18
+			continue
 		}
-		return value[:3] + "****" + value[len(value)-4:]
-	})
-	return redacted
+		if isPhoneAt(output, idx) {
+			builder.WriteString(output[idx : idx+3])
+			builder.WriteString("****")
+			builder.WriteString(output[idx+7 : idx+11])
+			idx += 11
+			continue
+		}
+
+		r, size := utf8.DecodeRuneInString(output[idx:])
+		if r == utf8.RuneError && size == 0 {
+			break
+		}
+		builder.WriteString(output[idx : idx+size])
+		idx += size
+	}
+
+	return builder.String()
 }
 
 func containsAny(value string, needles []string) bool {
@@ -308,4 +327,69 @@ func containsAny(value string, needles []string) bool {
 	}
 
 	return false
+}
+
+func isPhoneAt(value string, idx int) bool {
+	if idx+11 > len(value) || !isDigitBoundary(value, idx, 11) {
+		return false
+	}
+	if value[idx] != '1' || value[idx+1] < '3' || value[idx+1] > '9' {
+		return false
+	}
+	for offset := 0; offset < 11; offset++ {
+		if !isDigit(value[idx+offset]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func isIDCardAt(value string, idx int) bool {
+	if idx+18 > len(value) || !isDigitBoundary(value, idx, 18) {
+		return false
+	}
+	if value[idx] < '1' || value[idx] > '6' {
+		return false
+	}
+	for offset := 1; offset < 6; offset++ {
+		if !isDigit(value[idx+offset]) {
+			return false
+		}
+	}
+	yearPrefix := value[idx+6 : idx+8]
+	if yearPrefix != "18" && yearPrefix != "19" && yearPrefix != "20" {
+		return false
+	}
+	for offset := 8; offset < 10; offset++ {
+		if !isDigit(value[idx+offset]) {
+			return false
+		}
+	}
+	month := value[idx+10 : idx+12]
+	if month < "01" || month > "12" {
+		return false
+	}
+	day := value[idx+12 : idx+14]
+	if day < "01" || day > "31" {
+		return false
+	}
+	for offset := 14; offset < 17; offset++ {
+		if !isDigit(value[idx+offset]) {
+			return false
+		}
+	}
+	last := value[idx+17]
+	return isDigit(last) || last == 'X' || last == 'x'
+}
+
+func isDigitBoundary(value string, idx int, length int) bool {
+	before := idx == 0 || !isDigit(value[idx-1])
+	afterIdx := idx + length
+	after := afterIdx >= len(value) || !isDigit(value[afterIdx])
+	return before && after
+}
+
+func isDigit(value byte) bool {
+	return value >= '0' && value <= '9'
 }
