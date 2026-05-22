@@ -170,6 +170,8 @@ regression.BuildTC260Report(datasetPath, manifest, results, summary)
 
 报告不包含原始 prompt。
 
+CLI 在传入 `-manifest` 时会强制校验目标数据文件的 `sha256`、`bytes` 和 `line_count`。校验失败时不生成 report。
+
 ## 使用方式
 
 快速验证所有包：
@@ -360,6 +362,7 @@ datasets/tc260/dataset_v6/dataset.jsonl
 - `answer` / `accurate` positive-control 映射。
 - `tc260_category` 为空的兼容处理。
 - manifest 加载。
+- manifest 文件级强校验。
 - JSON evidence report 生成。
 - category/difficulty/source 维度统计。
 - `cmd/tianmu-regression` CLI runner。

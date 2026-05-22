@@ -37,6 +37,9 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("load manifest: %w", err)
 		}
+		if _, err := regression.VerifyManifestFile(*manifest, *datasetPath); err != nil {
+			return fmt.Errorf("verify manifest file: %w", err)
+		}
 	}
 
 	engine, err := newOracleEngine()
