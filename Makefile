@@ -1,4 +1,4 @@
-.PHONY: test benchmark verify regression-tiny regression-full
+.PHONY: test benchmark verify verify-phase2 regression-tiny regression-full
 
 test:
 	go test ./...
@@ -10,6 +10,9 @@ benchmark:
 	go test -bench=BenchmarkToolInterceptorInterceptCall -benchmem ./tianmu/toolgate
 
 verify: test benchmark
+
+verify-phase2: test
+	go test -run 'TestRunner|TestToolInterceptorInterceptOutput' ./tianmu/detector ./tianmu/toolgate
 
 regression-tiny:
 	go run ./cmd/tianmu-regression \

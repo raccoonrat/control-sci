@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/raccoonrat/control-sci/tianmu/core"
 	"github.com/raccoonrat/control-sci/tianmu/sanitize"
@@ -112,6 +113,44 @@ func (i *ToolInterceptor) InterceptCallWithPayload(sessionID string, toolName st
 	}, nil
 }
 
+func (i *ToolInterceptor) InterceptOutput(sessionID string, toolName string, rawOutput string) (string, *core.ControlDecisionObject, error) {
+	if sessionID == "" {
+		return "", nil, errors.New("session id is required")
+	}
+	tool, ok := i.registry[toolName]
+	if !ok {
+		return "", nil, fmt.Errorf("unregistered_tool_execution_denied: %s", toolName)
+	}
+
+	sanitizedOutput := i.normalizer.Normalize(rawOutput)
+	signals := outputSignals(sanitizedOutput)
+	decision, err := i.engine.MediateInbound(
+		core.RequestContext{
+			ProductID:       "Qira",
+			Language:        "zh-CN",
+			InteractionType: "tool_output",
+		},
+		core.IdentityContext{ActorID: sessionID},
+		core.DataContext{
+			DataClassification: "tool_output",
+			ContainsPII:        hasOutputPII(signals),
+			Source:             "external_api",
+			Destination:        "model_context",
+		},
+		core.ActionContext{
+			ActionType: "tool_output",
+			ToolName:   tool.Name,
+			SideEffect: false,
+		},
+		signals,
+	)
+	if err != nil {
+		return "", nil, err
+	}
+
+	return sanitizedOutput, decision, nil
+}
+
 func validateAndNormalizeParams(rawParams string, schema map[string]string, normalizer *sanitize.Normalizer) (map[string]any, error) {
 	var params map[string]any
 	if err := json.Unmarshal([]byte(rawParams), &params); err != nil {
@@ -186,4 +225,48 @@ func normalizeParamValue(value any, normalizer *sanitize.Normalizer) any {
 	default:
 		return value
 	}
+}
+
+func outputSignals(sanitizedOutput string) []core.DetectorSignal {
+	signals := make([]core.DetectorSignal, 0, 2)
+	if containsAny(sanitizedOutput, []string{"系统提示词", "忽略以上", "忽略之前", "打开沙箱"}) {
+		signals = append(signals, core.DetectorSignal{
+			DetectorID: "tool-output-hidden-instruction",
+			Category:   "prompt_injection",
+			Version:    "tool-output-boundary-v1",
+			Confidence: 0.90,
+			Triggered:  true,
+		})
+	}
+	if containsAny(sanitizedOutput, []string{"身份证", "手机号", "银行卡"}) {
+		signals = append(signals, core.DetectorSignal{
+			DetectorID: "tool-output-pii",
+			Category:   core.ChinesePIICategory,
+			Version:    "tool-output-boundary-v1",
+			Confidence: 0.90,
+			Triggered:  true,
+		})
+	}
+
+	return signals
+}
+
+func hasOutputPII(signals []core.DetectorSignal) bool {
+	for _, signal := range signals {
+		if signal.Triggered && signal.Category == core.ChinesePIICategory {
+			return true
+		}
+	}
+
+	return false
+}
+
+func containsAny(value string, needles []string) bool {
+	for _, needle := range needles {
+		if strings.Contains(value, needle) {
+			return true
+		}
+	}
+
+	return false
 }
