@@ -1,0 +1,199 @@
+package toolgate
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/raccoonrat/control-sci/tianmu/core"
+)
+
+func TestToolInterceptorSideEffectRequiresConfirmation(t *testing.T) {
+	interceptor := newTestInterceptor(t)
+	registerTransferTool(t, interceptor)
+
+	decision, err := interceptor.InterceptCall(
+		"session-agent-001",
+		"enterprise_finance_transfer",
+		`{"amount":50000.0,"to_account":"622202******1102"}`,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("intercept call: %v", err)
+	}
+
+	if decision.PolicyDecision.Decision != core.AskConfirmation {
+		t.Fatalf("decision = %q, want %q", decision.PolicyDecision.Decision, core.AskConfirmation)
+	}
+	if decision.ActionContext.ToolName != "enterprise_finance_transfer" {
+		t.Fatalf("tool name = %q, want enterprise_finance_transfer", decision.ActionContext.ToolName)
+	}
+}
+
+func TestToolInterceptorDeniesUnregisteredTool(t *testing.T) {
+	interceptor := newTestInterceptor(t)
+
+	_, err := interceptor.InterceptCall("session-agent-001", "ghost_malicious_tool", `{"cmd":"rm -rf /"}`, nil)
+	if err == nil {
+		t.Fatal("expected unregistered tool to be denied")
+	}
+	if !strings.Contains(err.Error(), "unregistered_tool_execution_denied") {
+		t.Fatalf("error = %q, want unregistered_tool_execution_denied", err)
+	}
+}
+
+func TestToolInterceptorRejectsMalformedOrMismatchedParams(t *testing.T) {
+	interceptor := newTestInterceptor(t)
+	registerTransferTool(t, interceptor)
+
+	tests := []struct {
+		name      string
+		rawParams string
+		want      string
+	}{
+		{name: "malformed json", rawParams: `{"amount":`, want: "tool_parameters_schema_malformed"},
+		{name: "missing field", rawParams: `{"amount":50000.0}`, want: "tool_parameters_missing_field"},
+		{name: "unknown field", rawParams: `{"amount":50000.0,"to_account":"acct","cmd":"oops"}`, want: "tool_parameters_unknown_field"},
+		{name: "wrong type", rawParams: `{"amount":"50000","to_account":"acct"}`, want: "tool_parameters_type_mismatch"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := interceptor.InterceptCall("session-agent-001", "enterprise_finance_transfer", test.rawParams, nil)
+			if err == nil {
+				t.Fatal("expected schema error")
+			}
+			if !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %q, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestToolInterceptorMediatesPIIToRedact(t *testing.T) {
+	interceptor := newTestInterceptor(t)
+	if err := interceptor.RegisterTool(ToolDefinition{
+		Name:        "calendar_lookup",
+		Description: "读取个人日程",
+		ParamSchema: map[string]string{
+			"date": "string",
+		},
+	}); err != nil {
+		t.Fatalf("register tool: %v", err)
+	}
+
+	decision, err := interceptor.InterceptCall(
+		"session-agent-001",
+		"calendar_lookup",
+		`{"date":"2026-05-22"}`,
+		[]core.DetectorSignal{
+			{
+				DetectorID: "cn-pii-fastpath",
+				Category:   core.ChinesePIICategory,
+				Version:    "cn-pii-v1",
+				Confidence: 0.90,
+				Triggered:  true,
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("intercept call: %v", err)
+	}
+
+	if decision.PolicyDecision.Decision != core.RedactThenAllow {
+		t.Fatalf("decision = %q, want %q", decision.PolicyDecision.Decision, core.RedactThenAllow)
+	}
+}
+
+func BenchmarkToolInterceptorInterceptCall(b *testing.B) {
+	interceptor := newBenchmarkInterceptor(b)
+	rawParams := `{"amount":50000.0,"to_account":"622202******1102"}`
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		decision, err := interceptor.InterceptCall("session-agent-001", "enterprise_finance_transfer", rawParams, nil)
+		if err != nil {
+			b.Fatalf("intercept call: %v", err)
+		}
+		if decision.PolicyDecision.Decision != core.AskConfirmation {
+			b.Fatalf("decision = %q, want %q", decision.PolicyDecision.Decision, core.AskConfirmation)
+		}
+	}
+}
+
+func newTestInterceptor(t *testing.T) *ToolInterceptor {
+	t.Helper()
+	evaluator, err := core.NewEvaluator(core.PolicyPack{
+		Version: "v1.3.0-tool-governance-pack",
+		Rules: []core.PolicyRule{
+			{
+				RiskCategory:        "prompt_injection",
+				ConfidenceThreshold: 0.80,
+				TargetDecision:      core.Block,
+				ReasonCode:          "malicious_tool_injection_blocked",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new evaluator: %v", err)
+	}
+	engine, err := core.NewEngine(core.PersonalAI, evaluator)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	interceptor, err := NewToolInterceptor(engine)
+	if err != nil {
+		t.Fatalf("new interceptor: %v", err)
+	}
+
+	return interceptor
+}
+
+func newBenchmarkInterceptor(b *testing.B) *ToolInterceptor {
+	b.Helper()
+	evaluator, err := core.NewEvaluator(core.PolicyPack{Version: "v1.3.0-tool-governance-pack"})
+	if err != nil {
+		b.Fatalf("new evaluator: %v", err)
+	}
+	engine, err := core.NewEngine(core.PersonalAI, evaluator)
+	if err != nil {
+		b.Fatalf("new engine: %v", err)
+	}
+	interceptor, err := NewToolInterceptor(engine)
+	if err != nil {
+		b.Fatalf("new interceptor: %v", err)
+	}
+	registerTransferToolForBenchmark(b, interceptor)
+
+	return interceptor
+}
+
+func registerTransferTool(t *testing.T, interceptor *ToolInterceptor) {
+	t.Helper()
+	if err := interceptor.RegisterTool(ToolDefinition{
+		Name:          "enterprise_finance_transfer",
+		Description:   "执行企业级资金转账账户划拨",
+		HasSideEffect: true,
+		ParamSchema: map[string]string{
+			"amount":     "float",
+			"to_account": "string",
+		},
+	}); err != nil {
+		t.Fatalf("register tool: %v", err)
+	}
+}
+
+func registerTransferToolForBenchmark(b *testing.B, interceptor *ToolInterceptor) {
+	b.Helper()
+	if err := interceptor.RegisterTool(ToolDefinition{
+		Name:          "enterprise_finance_transfer",
+		Description:   "执行企业级资金转账账户划拨",
+		HasSideEffect: true,
+		ParamSchema: map[string]string{
+			"amount":     "float",
+			"to_account": "string",
+		},
+	}); err != nil {
+		b.Fatalf("register tool: %v", err)
+	}
+}

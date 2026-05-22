@@ -36,11 +36,7 @@ func (e *Engine) MediateInbound(
 ) (*ControlDecisionObject, error) {
 	now := time.Now().UTC()
 	risk := summarizeRisk(signals)
-	decision := e.evaluator.Evaluate(risk)
-	if action.SideEffect && decision.Decision == Allow {
-		decision.Decision = AskConfirmation
-		decision.ReasonCode = "side_effect_action_requires_approval"
-	}
+	decision := e.evaluator.EvaluateAction(risk, action)
 
 	traceID, err := newTraceID()
 	if err != nil {
