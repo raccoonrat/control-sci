@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/raccoonrat/control-sci/tianmu/core"
 	"github.com/raccoonrat/control-sci/tianmu/sanitize"
@@ -49,26 +50,41 @@ func (r *Runner) Detect(ctx context.Context, prompt string) ([]core.DetectorSign
 		ctx = context.Background()
 	}
 	normalizedPrompt := r.normalizer.Normalize(prompt)
-	signals := make([]core.DetectorSignal, 0, len(r.detectors))
+	signals := make([]core.DetectorSignal, len(r.detectors))
+	errs := make([]error, len(r.detectors))
 
-	for _, detector := range r.detectors {
-		if err := ctx.Err(); err != nil {
+	var wg sync.WaitGroup
+	for idx, detector := range r.detectors {
+		wg.Add(1)
+		go func(idx int, detector LLMDetector) {
+			defer wg.Done()
+			if err := ctx.Err(); err != nil {
+				errs[idx] = err
+				return
+			}
+			signal, err := detector.Detect(ctx, normalizedPrompt)
+			if err != nil {
+				errs[idx] = fmt.Errorf("detector %s failed: %w", detector.ID(), err)
+				return
+			}
+			if signal.DetectorID == "" {
+				signal.DetectorID = detector.ID()
+			}
+			if signal.Category == "" {
+				signal.Category = detector.Category()
+			}
+			if signal.Version == "" {
+				signal.Version = detector.Version()
+			}
+			signals[idx] = signal
+		}(idx, detector)
+	}
+	wg.Wait()
+
+	for _, err := range errs {
+		if err != nil {
 			return nil, err
 		}
-		signal, err := detector.Detect(ctx, normalizedPrompt)
-		if err != nil {
-			return nil, fmt.Errorf("detector %s failed: %w", detector.ID(), err)
-		}
-		if signal.DetectorID == "" {
-			signal.DetectorID = detector.ID()
-		}
-		if signal.Category == "" {
-			signal.Category = detector.Category()
-		}
-		if signal.Version == "" {
-			signal.Version = detector.Version()
-		}
-		signals = append(signals, signal)
 	}
 
 	return signals, nil

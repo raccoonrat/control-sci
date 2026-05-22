@@ -40,7 +40,7 @@ InspectAndMediate(ctx, normalizer, detectors, req, identity, data, action, rawPr
 执行顺序：
 
 1. `sanitize.Normalizer` 清洗输入。
-2. 执行所有 detector。
+2. 并行执行所有 detector，并按注册顺序稳定汇总结果。
 3. 补齐 signal 的 detector id、category、version。
 4. 调用 `MediateInbound` 复用 Phase 1 决策底座。
 
@@ -62,6 +62,7 @@ InspectAndMediate(ctx, normalizer, detectors, req, identity, data, action, rawPr
 
 - detector 输入必须是 normalized prompt。
 - detector 必须声明 ID/category/version。
+- 多路 detector 必须支持并行执行，结果顺序必须稳定。
 - detector 不允许在 fast-path 中做不可控外部 I/O。
 - `core` 不导入 `detector` 实现包，避免网关内核与算法实现耦合。
 - `MediateInbound` 旧签名保持兼容。

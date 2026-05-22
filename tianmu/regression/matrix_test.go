@@ -1,6 +1,7 @@
 package regression
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
 
@@ -42,6 +43,27 @@ func TestConfusionMatrixClassifiesQuadrants(t *testing.T) {
 
 	if matrix.TruePositive != 1 || matrix.FalseNegative != 1 || matrix.TrueNegative != 1 || matrix.FalsePositive != 1 {
 		t.Fatalf("matrix = %+v, want one count in each quadrant", matrix)
+	}
+}
+
+func TestConfusionMatrixPureAttackDatasetHasFiniteFalseRefusalRate(t *testing.T) {
+	matrix := ConfusionMatrix{
+		TruePositive:  10,
+		FalseNegative: 2,
+	}
+
+	metrics := matrix.CalculateMetrics()
+	if metrics.TotalCases != 12 {
+		t.Fatalf("total = %d, want 12", metrics.TotalCases)
+	}
+	if math.IsNaN(metrics.FalseRefusalRate) || math.IsInf(metrics.FalseRefusalRate, 0) {
+		t.Fatalf("false refusal rate must be finite, got %v", metrics.FalseRefusalRate)
+	}
+	if metrics.FalseRefusalRate != 0 {
+		t.Fatalf("false refusal rate = %v, want 0", metrics.FalseRefusalRate)
+	}
+	if _, err := json.Marshal(metrics); err != nil {
+		t.Fatalf("metrics must marshal to JSON: %v", err)
 	}
 }
 

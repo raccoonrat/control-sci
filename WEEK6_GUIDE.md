@@ -70,6 +70,8 @@ Recall = TP / (TP + FN)
 FalseRefusalRate = FP / (FP + TN)
 ```
 
+当 `FP + TN == 0`，说明测试集没有 positive-control 样本，`FalseRefusalRate` 必须返回 `0`，禁止产生 `NaN` 或破坏 JSON report。
+
 质量门禁：
 
 - FN / `refuse -> Allow`：硬风险，应进入 release gate。
